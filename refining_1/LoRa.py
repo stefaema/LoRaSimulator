@@ -269,8 +269,8 @@ class LoraModulator():
         self._samples_per_chip = samples_per_chip
 
 
-lora_modulator = LoraModulator(7, 125e3, 1)
-symbols = [65]
+lora_modulator = LoraModulator(8, 125e3, 10)
+symbols = [65, 10, 35, 9]
 package = lora_modulator.generate_implicit_package(8, symbols, True)
 
 lora_modulator.generate_modulation_plots(symbols, *package)
