@@ -1,8 +1,8 @@
 from lora_modem import LoraModulator, LoraDemodulator
 import numpy as np
 import matplotlib.pyplot as plt
-import csv
-import pandas as pd
+import cProfile
+import pstats
 
 def signal_power(signal):
     # Calculate the signal power
@@ -24,20 +24,31 @@ def generate_awgn(SNR, w):
     variance = signal_power(w) / SNR_linear
     std_dev = variance ** 0.5
     # Generate noise
-    N = [np.random.normal(0, std_dev) + np.random.normal(0, std_dev)*1j for _ in w]
-    noisy_signal = [w[i] + N[i] for i in range(len(w))]
-    return noisy_signal, N, variance
+    noise_real = np.random.normal(0, std_dev, len(w))
+    noise_imag = np.random.normal(0, std_dev, len(w))
+    noise = noise_real + 1j * noise_imag
+    
+    # Add noise to the signal
+    noisy_signal = w + noise
+    
+    return noisy_signal, noise, variance
 
-import numpy as np
+def generate_all_symbols(sf):
+    mod = LoraModulator(sf, 125e3, 1)
+    symbol_signals = []
+    for i in range(2**sf):
+        symbol_signals.append(mod.modulate_symbols([i])[2])
+    return symbol_signals
+
 
 def generate_SER_SNR_ratio_binary(sf):
-    sims = 1000000
+    sims = 100000
     # Set up SNR range
     snr_range = np.arange(-30 + 12 - sf, 2, 1)
     # Initialize MoDem
-    mod = LoraModulator(sf, 125e3, 1)
+    
     demod = LoraDemodulator(sf, 125e3, 1)
-
+    symbol_signals = generate_all_symbols(sf)
     # Initialize storage arrays
     SNR_values = []
     SER_values = []
@@ -51,7 +62,7 @@ def generate_SER_SNR_ratio_binary(sf):
             # Generate a random message
             message = np.random.randint(0, 2**sf)
             # Modulate the message
-            signal = mod.modulate_symbols([message])[2]
+            signal = symbol_signals[message]
             # Generate AWGN
             noisy_signal = generate_awgn(f'{snr}dB', signal)[0]
             # Demodulate the signal
@@ -92,5 +103,11 @@ def plot_SER_SNR_from_binary(sf):
     plt.grid(True)
     plt.show()
 
-generate_SER_SNR_ratio_binary(7)
+# Profile the generate_SER_SNR_ratio_binary function
+cProfile.run('generate_SER_SNR_ratio_binary(7)', 'profile_output')
+
+# Load the profiling results
+p = pstats.Stats('profile_output')
+p.sort_stats('cumulative').print_stats(10)
+
 plot_SER_SNR_from_binary(7)
