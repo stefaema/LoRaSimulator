@@ -13,20 +13,17 @@ def signal_power(signal):
 def generate_awgn(SNR, w):
     # Check if SNR is given in dB, DB, or db and convert if necessary
     if isinstance(SNR, str) and SNR.lower().endswith('db'):
-        # Extract the numeric part and convert from dB to linear scale
-        SNR_value = float(SNR[:-2])  # Remove the last two characters and convert to float
-        SNR_linear = 10 ** (SNR_value / 10)
+        SNR_linear = 10 ** (float(SNR[:-2]) / 10)
     else:
-        # Assume SNR is already in linear scale
-        SNR_linear = SNR
+        SNR_linear = float(SNR)
     
+    signal_len = len(w)
+
     # Determine the noise power (variance)
     variance = signal_power(w) / SNR_linear
-    std_dev = variance ** 0.5
+    std_dev = np.sqrt(variance)
     # Generate noise
-    noise_real = np.random.normal(0, std_dev, len(w))
-    noise_imag = np.random.normal(0, std_dev, len(w))
-    noise = noise_real + 1j * noise_imag
+    noise = np.random.normal(0, std_dev, signal_len) + 1j * np.random.normal(0, std_dev, signal_len)
     
     # Add noise to the signal
     noisy_signal = w + noise
@@ -42,7 +39,7 @@ def generate_all_symbols(sf):
 
 
 def generate_SER_SNR_ratio_binary(sf):
-    sims = 100000
+    sims = 1000
     # Set up SNR range
     snr_range = np.arange(-30 + 12 - sf, 2, 1)
     # Initialize MoDem
@@ -93,7 +90,7 @@ def plot_SER_SNR_from_binary(sf):
     SER_values = data[1, :]
     
     # Plot the data
-    plt.figure(figsize=(10, 6))
+    
     plt.plot(SNR_values, SER_values, marker='o', linestyle='-')
     plt.xlim([SNR_values.min(), SNR_values.max()])
     plt.yscale('log')  # Logarithmic scale for SER
@@ -101,13 +98,15 @@ def plot_SER_SNR_from_binary(sf):
     plt.ylabel('SER (log scale)')
     plt.title(f'SER vs. SNR for Spreading Factor {sf}')
     plt.grid(True)
-    plt.show()
+
+
+            
 
 # Profile the generate_SER_SNR_ratio_binary function
-cProfile.run('generate_SER_SNR_ratio_binary(7)', 'profile_output')
 
-# Load the profiling results
-p = pstats.Stats('profile_output')
-p.sort_stats('cumulative').print_stats(10)
 
+plt.figure(figsize = (16, 6))
 plot_SER_SNR_from_binary(7)
+plot_SER_SNR_from_binary(8)
+plot_SER_SNR_from_binary(9)
+plt.show()

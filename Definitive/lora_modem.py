@@ -259,6 +259,8 @@ class LoraDemodulator():
         self._frequency_slope = bw / self._symbol_duration
         self._signal_coefficient = 1 / np.sqrt(2**self._spreading_factor * self._samples_per_chip)
 
+        self._base_signals = self.generate_base_signals()
+
     def generate_downchirp(self):
         '''
         This function generates the downchirp of the LoRa modulation.
@@ -304,6 +306,17 @@ class LoraDemodulator():
         quarter_upchirp_signal = [self._signal_coefficient * np.exp(1j * phase) for phase in instantanous_phase]
         return quarter_upchirp_signal
     
+    def generate_base_signals(self):
+        upchirp = self.generate_upchirp()
+        downchirp = self.generate_downchirp()
+        quarter_upchirp = self.generate_quarter_upchirp()
+        base_signals = {
+            'upchirp': upchirp,
+            'downchirp': downchirp,
+            'quarter_upchirp': quarter_upchirp
+        }
+        return base_signals
+    
     def adjust_correlation(self, correlation):
         spc = self._samples_per_chip
         sf = self._spreading_factor
@@ -328,14 +341,11 @@ class LoraDemodulator():
 
         symbol (int): The symbol of the LoRa modulation.
         '''
-        if base_fn not in ['downchirp', 'upchirp', 'quarter_downchirp']:
+        if base_fn not in ['downchirp', 'upchirp', 'quarter_upchirp']:
             raise ValueError('The base function must be either "downchirp", "upchirp" or "quarter_upchirp".')
-        if base_fn == 'downchirp':
-            base_signal = self.generate_downchirp()
-        elif base_fn == 'upchirp':
-            base_signal = self.generate_upchirp()
-        elif base_fn == 'quarter_upchirp':
-            base_signal = self.generate_quarter_upchirp()
+        base_signal = self._base_signals.get(base_fn)
+        if base_signal is None:
+            raise ValueError(f'The base function {base_fn} is not recognized. It must be either "downchirp", "upchirp" or "quarter_upchirp".')
         dechirped_signal = [symbol_signal[i] * base_signal[i] for i in range(len(symbol_signal))]
         correlation = np.fft.fft(dechirped_signal)
         # correlation = self.adjust_correlation(correlation)
@@ -409,6 +419,8 @@ class LoraDemodulator():
         self.__samples_per_symbol = int(self.__chips_number * self.resolution_between_chips)
         self.__sampling_period = self.__symbol_duration / self.__samples_per_symbol
         self.__frequency_slope = (self.__bandwidth ** 2) / self.__chips_number
+        self._base_signals = self.generate_base_signals()
+
 
     @property
     def bandwidth(self):
@@ -422,6 +434,7 @@ class LoraDemodulator():
         self.__samples_per_symbol = int(self.__chips_number * self.resolution_between_chips)
         self.__sampling_period = self.__symbol_duration / self.__samples_per_symbol
         self.__frequency_slope = (value ** 2) / self.__chips_number
+        self._base_signals = self.generate_base_signals()
 
     @property
     def resolution_between_chips(self):
@@ -435,3 +448,4 @@ class LoraDemodulator():
         self.__resolution_between_chips = value
         self.__samples_per_symbol = int(self.__chips_number * value)
         self.__sampling_period = self.__symbol_duration / self.__samples_per_symbol
+        self._base_signals = self.generate_base_signals()
