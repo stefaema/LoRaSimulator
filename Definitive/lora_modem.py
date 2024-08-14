@@ -449,3 +449,4 @@ class LoraDemodulator():
         self.__samples_per_symbol = int(self.__chips_number * value)
         self.__sampling_period = self.__symbol_duration / self.__samples_per_symbol
         self._base_signals = self.generate_base_signals()
+

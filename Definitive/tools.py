@@ -39,7 +39,7 @@ def generate_all_symbols(sf):
 
 
 def generate_SER_SNR_ratio_binary(sf):
-    sims = 1000
+    sims = 50000
     # Set up SNR range
     snr_range = np.arange(-30 + 12 - sf, 2, 1)
     # Initialize MoDem
@@ -104,8 +104,6 @@ def plot_SER_SNR_from_binary(sf):
 
 # Profile the generate_SER_SNR_ratio_binary function
 
-
-plt.figure(figsize = (16, 6))
 plot_SER_SNR_from_binary(7)
 plot_SER_SNR_from_binary(8)
 plot_SER_SNR_from_binary(9)
