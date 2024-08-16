@@ -341,8 +341,6 @@ class LoraDemodulator():
 
         symbol (int): The symbol of the LoRa modulation.
         '''
-        if base_fn not in ['downchirp', 'upchirp', 'quarter_upchirp']:
-            raise ValueError('The base function must be either "downchirp", "upchirp" or "quarter_upchirp".')
         base_signal = self._base_signals.get(base_fn)
         if base_signal is None:
             raise ValueError(f'The base function {base_fn} is not recognized. It must be either "downchirp", "upchirp" or "quarter_upchirp".')
