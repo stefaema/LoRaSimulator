@@ -7,6 +7,8 @@ class LoraReservedArtifacts(Enum):
     FULL_DOWNCHIRP = -2
     QUARTER_DOWNCHIRP = -3
 
+
+
 class LoraModulator():
     """Class that implements the modulation of LoRa signals."""
     def validate_parameters(self):
@@ -196,51 +198,6 @@ class LoraModulator():
         package.extend(payload)
         time_axis, frequency_evolution, signal = self.modulate_symbols(package)
         return time_axis, frequency_evolution, signal
-
-        
-    @property
-    def spreading_factor(self):
-        return self.__spreading_factor
-    @spreading_factor.setter
-    def spreading_factor(self, value):
-        if value not in [7, 8, 9, 10, 11, 12]:
-            raise ValueError("Spreading factor has to be one of the integers: 7, 8, 9, 10, 11 or 12")
-        self.__spreading_factor = value
-        self.__chips_number = 2 ** value
-        self.__symbol_duration = self.__chips_number / self.__bandwidth
-        self.__samples_per_symbol = int(self.__chips_number * self.resolution_between_chips)
-        self.__sampling_period = self.__symbol_duration / self.__samples_per_symbol
-        self.__frequency_slope = (self.__bandwidth ** 2) / self.__chips_number
-
-    @property
-    def bandwidth(self):
-        return self.__bandwidth
-    @bandwidth.setter
-    def bandwidth(self, value):
-        if value not in [125, 250, 500]:
-            raise ValueError("Bandwidth has to be one of the integers: 125, 250 or 500. Remember that it is in kHz.")
-        self.__bandwidth = value
-        self.__symbol_duration = self.__chips_number / value
-        self.__samples_per_symbol = int(self.__chips_number * self.resolution_between_chips)
-        self.__sampling_period = self.__symbol_duration / self.__samples_per_symbol
-        self.__frequency_slope = (value ** 2) / self.__chips_number
-
-    @property
-    def resolution_between_chips(self):
-        return self.__resolution_between_chips
-    @resolution_between_chips.setter
-    def resolution_between_chips(self, value):
-        if value < 1:
-            raise ValueError("Resolution between chips has to be greater than 0")
-        if value % 2 != 0:
-            print("Be careful, the resolution between chips is not a multiple of 2. This may lead to errors.")
-        self.__resolution_between_chips = value
-        self.__samples_per_symbol = int(self.__chips_number * value)
-        self.__sampling_period = self.__symbol_duration / self.__samples_per_symbol
-
-    @property
-    def samples_per_symbol(self):
-        return self.__samples_per_symbol
 
 
 
