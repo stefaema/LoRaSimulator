@@ -8,6 +8,7 @@ class LoraReservedArtifacts(Enum):
     QUARTER_DOWNCHIRP = -3
 
 class LoraModulator():
+    """Class that implements the modulation of LoRa signals."""
     def validate_parameters(self):
         '''
         This function validates the parameters of the LoRa modulation.
@@ -91,7 +92,8 @@ class LoraModulator():
             y_intercept = symbol * (self._bandwidth / 2**sf)
             symbol_frequency_evolution = [ ( y_intercept + aux_factor * k/(self._symbol_duration * spc) ) % (aux_factor * self._bandwidth) for k in sample_range]
             whole_frequency_evolution.extend(symbol_frequency_evolution)
-        
+
+        whole_frequency_evolution = np.array(whole_frequency_evolution)
         return whole_frequency_evolution
 
     def generate_instantaneous_phase(self, symbols):
@@ -131,6 +133,8 @@ class LoraModulator():
             symbol_phase_evolution_2 = [( -2*np.pi * (k/spc - (2**sf - symbol)) ) * indicator_function[k] for k in samples_range]
             symbol_phase_evolution = [symbol_phase_evolution_1[k] + symbol_phase_evolution_2[k] for k in samples_range]
             whole_phase_evolution.extend(symbol_phase_evolution)
+
+        whole_phase_evolution = np.array(whole_phase_evolution)
         return whole_phase_evolution
 
     def generate_signal(self, symbols):
@@ -146,7 +150,7 @@ class LoraModulator():
         signal (np.array): The signal of the LoRa modulation.
         '''
         instantaneous_phase = self.generate_instantaneous_phase(symbols)
-        signal = [self._signal_coefficient * np.exp(1j * phase) for phase in instantaneous_phase]
+        signal = np.array([self._signal_coefficient * np.exp(1j * phase) for phase in instantaneous_phase])
         return signal
     
     def modulate_symbols(self, symbols):
@@ -238,7 +242,10 @@ class LoraModulator():
     def samples_per_symbol(self):
         return self.__samples_per_symbol
 
+
+
 class LoraDemodulator():
+    """Class that implements the demodulation of LoRa signals."""
     def validate_parameters(self):
         '''
         This function validates the parameters of the LoRa modulation.
@@ -354,10 +361,10 @@ class LoraDemodulator():
         symbol = np.argmax(correlation) % 2**self._spreading_factor
         
         if return_magnitude:
-            return symbol, np.max(correlation)
+            return symbol, correlation[symbol]
         return symbol
 
-    def demodulate_symbols(self, signal, base_fn = 'downchirp'):
+    def demodulate_symbols(self, signal, base_fn = 'downchirp', return_magnitude = False):
         '''
         This function demodulates the symbols in the LoRa modulation payload, given that the received signal is already synchronized.
 
@@ -373,57 +380,165 @@ class LoraDemodulator():
         spc = self._samples_per_chip
         sf = self._spreading_factor
         symbols = []
-        for i in range(0, len(signal), spc * 2**sf):
-            symbol_signal = signal[i:i + spc * 2**sf]
-            symbol = self.demodulate_symbol(symbol_signal, base_fn)
-            symbols.append(symbol)
-        return symbols
+        if not return_magnitude:
+            for i in range(0, len(signal), spc * 2**sf):
+                symbol_signal = signal[i:i + spc * 2**sf]
+                symbol = self.demodulate_symbol(symbol_signal, base_fn)
+                symbols.append(symbol)
+            return symbols
+        else:
+            magnitudes = []
+            for i in range(0, len(signal), spc * 2**sf):
+                symbol_signal = signal[i:i + spc * 2**sf]
+                symbol, magnitude = self.demodulate_symbol(symbol_signal, base_fn, return_magnitude)
+                symbols.append(symbol)
+                magnitudes.append(magnitude)
+            return symbols, magnitudes
 
 
+
+class LoraSynchronizer():
+    """Class that implements the synchronization of LoRa signals."""
+    def validate_parameters(self, spreading_factor, samples_per_chip, demodulator, preamble_number):
+        if spreading_factor not in range(7, 13) or not isinstance(spreading_factor, int):
+            raise ValueError('The spreading factor must be an integer between 7 and 12.')
+        if samples_per_chip < 1 or not isinstance(preamble_number, int):
+            raise ValueError('Samples per chip must be a positive integer')
+        if not isinstance(demodulator, LoraDemodulator):
+            raise ValueError('Demodulator must be an instance of LoraDemodulator')
+        if preamble_number < 1 or not isinstance(preamble_number, int):
+            raise ValueError('Preamble number must be a positive integer')
         
+    def __init__(self, spreading_factor, samples_per_chip, demodulator, preamble_number):
+        self.validate_parameters(spreading_factor, samples_per_chip, demodulator, preamble_number)
+        self._spreading_factor = spreading_factor
+        self._samples_per_chip = samples_per_chip
+        self._demodulator = demodulator 
+        self._preamble_number = preamble_number
 
+    def _detect_chirp(self, signal_segment, chirp_type):
+        """Helper function to detect specific chirp types in a given signal segment."""
+        chirp_type = 'upchirp' if chirp_type == 'downchirp' else 'downchirp'
+        return self._demodulator.demodulate_symbol(signal_segment, chirp_type) == 0
 
-    @property
-    def spreading_factor(self):
-        return self.__spreading_factor
-    @spreading_factor.setter
-    def spreading_factor(self, value):
-        if value not in [7, 8, 9, 10, 11, 12]:
-            raise ValueError("Spreading factor has to be one of the integers: 7, 8, 9, 10, 11 or 12")
-        self.__spreading_factor = value
-        self.__chips_number = 2 ** value
-        self.__symbol_duration = self.__chips_number / self.__bandwidth
-        self.__samples_per_symbol = int(self.__chips_number * self.resolution_between_chips)
-        self.__sampling_period = self.__symbol_duration / self.__samples_per_symbol
-        self.__frequency_slope = (self.__bandwidth ** 2) / self.__chips_number
-        self._base_signals = self.generate_base_signals()
+    def _get_samples_per_symbol(self):
+        return self._samples_per_chip * 2 ** self._spreading_factor
 
+    def synchronize_rx_buffer(self, rx_signal):
+        sps = self._get_samples_per_symbol()
+        preamble_found, payload_index, package_length = self._phase1sync(rx_signal)
+        #Ignoring of the payload length symbol
+        payload_index += sps
 
-    @property
-    def bandwidth(self):
-        return self.__bandwidth
-    @bandwidth.setter
-    def bandwidth(self, value):
-        if value not in [125, 250, 500]:
-            raise ValueError("Bandwidth has to be one of the integers: 125, 250 or 500. Remember that it is in kHz.")
-        self.__bandwidth = value
-        self.__symbol_duration = self.__chips_number / value
-        self.__samples_per_symbol = int(self.__chips_number * self.resolution_between_chips)
-        self.__sampling_period = self.__symbol_duration / self.__samples_per_symbol
-        self.__frequency_slope = (value ** 2) / self.__chips_number
-        self._base_signals = self.generate_base_signals()
+        if preamble_found:
+            message_samples = (package_length) * sps 
+            payload_start = payload_index
+            payload_end = payload_index + message_samples
+            rx_payload_segment = rx_signal[payload_start: payload_end]
+            return rx_payload_segment
+        else:
+            print('Synchronization failed!')
+            return None
+    
+    def _phase1sync(self, rx_signal):
+        sps = self._get_samples_per_symbol()
+        print('Synchronization started...')
+        print("Phase 1: Searching for upchirps...")
+        for i in range(len(rx_signal)):
+            # Extract the iterative segment to analyze
+            segment = rx_signal[i:i + sps]
+            if len(segment) < sps:
+                break
+            # Check if the segment is an upchirp
+            if self._detect_chirp(segment, 'upchirp'):
+                print('Upchirp found at index: ', i)
+                # Check if the next symbols are members of the preamble (phase 2)
+                preamble_found, payload_index, reconstructed_preamble = self._phase2sync(rx_signal, i)
+                
+                if preamble_found:
+                    
+                    offset = 0
+                    if self._samples_per_chip > 1:
+                        
+                        payload_index, offset = self._phase3sync(rx_signal, i, payload_index, reconstructed_preamble)
+                        
+                    package_length = self._demodulator.demodulate_symbol(rx_signal[payload_index:payload_index + sps], 'downchirp')
+                    
+                    print('Synchronization successful!\n-----------------------------------------------------------')
+                    
+                    print('Preamble found at index: ', i + offset)
+                    if self._samples_per_chip > 1:
+                        print('Refined by an offset of: ', offset)
+                    print('Package length: ', package_length)
+                    print('Payload starts at index: ', payload_index)
+                    upchirps = reconstructed_preamble.count(LoraReservedArtifacts.FULL_UPCHIRP)
+                    downchirps = reconstructed_preamble.count(LoraReservedArtifacts.FULL_DOWNCHIRP)
+                    print(f'Reconstructed preamble: [{upchirps + 1} upchirps, {downchirps} downchirps]')
 
-    @property
-    def resolution_between_chips(self):
-        return self.__resolution_between_chips
-    @resolution_between_chips.setter
-    def resolution_between_chips(self, value):
-        if value < 1:
-            raise ValueError("Resolution between chips has to be greater than 0")
-        if value % 2 != 0:
-            print("Be careful, the resolution between chips is not a multiple of 2. This may lead to errors.")
-        self.__resolution_between_chips = value
-        self.__samples_per_symbol = int(self.__chips_number * value)
-        self.__sampling_period = self.__symbol_duration / self.__samples_per_symbol
-        self._base_signals = self.generate_base_signals()
+                    return True, payload_index, package_length
+        return False, -1, -1
+    
+    def _phase2sync(self, rx_signal, candidate_index):
+        sps = self._get_samples_per_symbol()
+        
+        current_index = candidate_index + sps
+        
+        reconstructed_preamble = []
+        while True:
+            segment = rx_signal[current_index:current_index + sps]
+            if len(segment) < sps:
+                break
+            if self._detect_chirp(segment, 'upchirp'):
+                reconstructed_preamble.append(LoraReservedArtifacts.FULL_UPCHIRP)
+                current_index += sps
+                continue
+            elif self._detect_chirp(segment, 'downchirp'):
+                reconstructed_preamble.append(LoraReservedArtifacts.FULL_DOWNCHIRP)
+                current_index += sps
+                alleged_second_downchip = rx_signal[current_index:current_index + sps]
+                if self._detect_chirp(alleged_second_downchip, 'downchirp'):
+                    reconstructed_preamble.append(LoraReservedArtifacts.FULL_DOWNCHIRP)
+                    payload_index = int(current_index + sps * 1.25)
+                    print("Phase 2: Ensuring that the candidate upchirp is a preamble member...")
+                    print("Preamble allegedly found at index: ", candidate_index)
+                    return True, payload_index, reconstructed_preamble
+                else:
+                    break
+            else:
+                break
+        return False, -1, -1
+    
+    def _evaluate_offset(self, rx_signal, candidate_index, offset, upchirps, downchirps):
+        sps = self._get_samples_per_symbol()
+        upchirps_index = candidate_index + sps + offset
+        downchirps_index = upchirps_index + sps * upchirps
+        upchirps_length = sps * upchirps
+        downchirps_length = sps * downchirps
+        demod = []
+        upchirps_segment = rx_signal[upchirps_index:upchirps_index + upchirps_length]
+        downchirps_segment = rx_signal[downchirps_index:downchirps_index + downchirps_length]
+        upchirp_symbols, upchirp_magnitudes = self._demodulator.demodulate_symbols(upchirps_segment, 'downchirp', return_magnitude=True)
+        downchirp_symbols, downchirp_magnitudes = self._demodulator.demodulate_symbols(downchirps_segment, 'upchirp', return_magnitude=True)
+        magnitudes = np.concatenate((np.abs(upchirp_magnitudes), np.abs(downchirp_magnitudes)))
+        mean_magnitude = np.mean(magnitudes)
+        demod.extend(upchirp_symbols)
+        demod.extend(downchirp_symbols)
+        if demod.count(0) != len(demod):
+            return 0
+        return mean_magnitude
 
+    def _phase3sync(self, rx_signal, candidate_index, payload_index, reconstructed_preamble):
+        sps = self._get_samples_per_symbol()
+        print("Phase 3: Refining synchronization index... (SPC > 1 requires it)")
+        upchirps = reconstructed_preamble.count(LoraReservedArtifacts.FULL_UPCHIRP)
+        downchirps = reconstructed_preamble.count(LoraReservedArtifacts.FULL_DOWNCHIRP)
+        offset = 0
+        offset_magnitudes = []
+        for offset in range(0, self._samples_per_chip):
+            mean_magnitude = self._evaluate_offset(rx_signal, candidate_index, offset, upchirps, downchirps)
+            offset_magnitudes.append(mean_magnitude)
+        chosen_offset = np.argmax(offset_magnitudes)
+        print("Offset quality measurements: ", offset_magnitudes)
+        print("Offset that ensures Highest Quality Synchronization: ", chosen_offset)
+        payload_index = chosen_offset + payload_index
+        return payload_index, chosen_offset
