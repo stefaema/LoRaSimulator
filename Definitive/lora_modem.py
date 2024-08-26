@@ -330,7 +330,7 @@ class LoraDemodulator():
         Parameters:
 
         signal (np.array): The signal of the received LoRa modulation.
-        base_fn (np.array): A string indicating the base function of the symbol in the modulation that shall be used to correlate the signal to its embedded symbol.
+        base_fn (np.array): A string indicating the base function to be used in the demodulation.
 
         Returns:
 
@@ -384,6 +384,13 @@ class LoraSynchronizer():
         return self._samples_per_chip * 2 ** self._spreading_factor
 
     def synchronize_rx_buffer(self, rx_signal):
+        """
+        Function that synchronizes a receiver buffer and returns the signal segment allegedly containing the payload of the received package.
+        Parameters:
+        rx_signal (np.array): The received signal buffer.
+        Returns:
+        rx_payload_segment (np.array): The synchronized payload segment. Contains the payload of the LoRa package (if the synchronization process was successfull). 
+        """
         sps = self._get_samples_per_symbol()
         preamble_found, payload_index, package_length = self._phase1sync(rx_signal)
         #Ignoring of the payload length symbol
