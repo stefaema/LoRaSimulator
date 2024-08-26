@@ -17,8 +17,8 @@ class LoraModulator():
         '''
         if self._spreading_factor not in range(7, 13) or not isinstance(self._spreading_factor, int):
             raise ValueError('The spreading factor must be an integer between 7 and 12.')
-        if  not isinstance(self._bandwidth, (int, float)):
-            raise ValueError('The bandwidth must be an integer or float. Tipically, it is 125e3 Hz, 250e3 Hz or 500e3 Hz.')
+        if  self._bandwidth <= 0 or not isinstance(self._bandwidth, (int, float)):
+            raise ValueError('The bandwidth must be a positive integer or float. Tipically, it is 125e3 Hz, 250e3 Hz or 500e3 Hz.')
         if self._bandwidth not in [125e3, 250e3, 500e3, 125000, 25000, 500000]:
             print('WARNING: Bandwidth typically takes values of 125e3 Hz, 250e3 Hz, or 500e3 Hz.')
         if self._samples_per_chip < 1 or not isinstance(self._samples_per_chip, int):
@@ -186,6 +186,8 @@ class LoraModulator():
         signal (np.array): The signal of the LoRa modulation.
         '''
         package = []
+        if len(payload) > 2**self._spreading_factor:
+            raise ValueError('The payload length must be less than 2^SF.')
         for i in range(preamble_number):
             package.append(LoraReservedArtifacts.FULL_UPCHIRP)
         for i in range(2):
