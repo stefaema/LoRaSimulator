@@ -417,7 +417,7 @@ class LoraSynchronizer():
                 break
             # Check if the segment is an upchirp
             if self._detect_chirp(segment, 'upchirp'):
-                print('Upchirp found at index: ', i)
+                # print('Upchirp found at index: ', i)
                 # Check if the next symbols are members of the preamble (phase 2)
                 preamble_found, payload_index, reconstructed_preamble = self._phase2sync(rx_signal, i)
                 
@@ -452,16 +452,21 @@ class LoraSynchronizer():
         reconstructed_preamble = []
         while True:
             segment = rx_signal[current_index:current_index + sps]
+            # Check if there is enough samples to analyze. If not, break the loop and therefore the synchronization process (as the preamble is not complete)
             if len(segment) < sps:
                 break
+            # Check if the segment is an upchirp. If so, append it to the reconstructed preamble and move to the next segment, hoping it is a downchirp.
             if self._detect_chirp(segment, 'upchirp'):
                 reconstructed_preamble.append(LoraReservedArtifacts.FULL_UPCHIRP)
                 current_index += sps
                 continue
+            # If the segment is not an upchirp, check if it is a downchirp. If so, append it to the reconstructed preamble and move to the next segment, hoping it is another downchirp.
             elif self._detect_chirp(segment, 'downchirp'):
                 reconstructed_preamble.append(LoraReservedArtifacts.FULL_DOWNCHIRP)
                 current_index += sps
                 alleged_second_downchip = rx_signal[current_index:current_index + sps]
+                # If the second segment is not a downchirp, break the loop and therefore the synchronization process (as the preamble is not complete)
+                # If the second segment is a downchirp, the preamble is complete (as the preamble ends with two consecutive downchirps) and the synchronization process is successful.
                 if self._detect_chirp(alleged_second_downchip, 'downchirp'):
                     reconstructed_preamble.append(LoraReservedArtifacts.FULL_DOWNCHIRP)
                     payload_index = int(current_index + sps * 1.25)
@@ -475,6 +480,19 @@ class LoraSynchronizer():
         return False, -1, -1
     
     def _evaluate_offset(self, rx_signal, candidate_index, offset, upchirps, downchirps):
+        """
+        Evaluate the quality of a given offset for a index synchronization candidate.
+
+        Parameters:
+        rx_signal (np.array): The received signal buffer.
+        candidate_index (int): The index of the candidate synchronization point.
+        offset (int): The offset to evaluate.
+        upchirps (int): The number of upchirps in the preamble.
+        downchirps (int): The number of downchirps in the preamble.
+
+        Returns:
+        mean_magnitude (float): The mean magnitude of the demodulated preamble with the given offset (It is the way we found to rank the different offsets).
+        """
         sps = self._get_samples_per_symbol()
         upchirps_index = candidate_index + sps + offset
         downchirps_index = upchirps_index + sps * upchirps
@@ -494,6 +512,22 @@ class LoraSynchronizer():
         return mean_magnitude
 
     def _phase3sync(self, rx_signal, candidate_index, payload_index, reconstructed_preamble):
+        """
+        Refine the synchronization index by evaluating different offsets and choosing the one that ensures the highest quality synchronization.
+        
+        Parameters:
+        rx_signal (np.array): The received signal buffer.
+        candidate_index (int): The index of the candidate synchronization point
+        payload_index (int): The index of the payload start.
+        reconstructed_preamble (list): The reconstructed preamble.
+
+        Returns:
+        payload_index (int): The refined payload start index.
+        chosen_offset (int): The chosen offset that ensures the highest quality synchronization.
+
+        """
+
+
         sps = self._get_samples_per_symbol()
         print("Phase 3: Refining synchronization index... (SPC > 1 requires it)")
         upchirps = reconstructed_preamble.count(LoraReservedArtifacts.FULL_UPCHIRP)
@@ -503,6 +537,9 @@ class LoraSynchronizer():
         for offset in range(0, self._samples_per_chip):
             mean_magnitude = self._evaluate_offset(rx_signal, candidate_index, offset, upchirps, downchirps)
             offset_magnitudes.append(mean_magnitude)
+        offset_magnitudes = np.array(offset_magnitudes)
+        # Normalizing the magnitudes
+        offset_magnitudes = offset_magnitudes / np.max(offset_magnitudes)
         chosen_offset = np.argmax(offset_magnitudes)
         print("Offset quality measurements: ", offset_magnitudes)
         print("Offset that ensures Highest Quality Synchronization: ", chosen_offset)
