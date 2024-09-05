@@ -201,7 +201,116 @@ class LoraModulator():
         package.extend(payload)
         time_axis, frequency_evolution, signal = self.modulate_symbols(package)
         return time_axis, frequency_evolution, signal
+    
+    def debug_modulate_explicit_package(self, preamble_number, payload):
+        '''
+        This function modulates an explicit package in the LoRa modulation. (The header only consists of the number of symbols in the payload).
 
+        Debug mode (returns more information and works directly with the plots generator).
+
+        Parameters:
+
+        preamble_number (int): The number of preambles in the package.
+        payload (list): The payload of the package.
+
+        Returns:
+
+        payload (list): The payload of the LoRa modulation.
+
+        package (list): The package of the LoRa modulation (Includes Preamble and Sync Window Artifacts aside from the payload).
+
+        payload_time_axis (np.array): The time axis of the payload.
+
+        payload_frequency_evolution (np.array): The frequency evolution of the payload.
+
+        payload_signal (np.array): The signal of the payload.
+
+        pkg_time_axis (np.array): The time axis of the package.
+
+        pkg_frequency_evolution (np.array): The frequency evolution of the package.
+
+        pkg_signal (np.array): The signal of the package.
+        
+        '''
+        package = []
+        if len(payload) > 2**self._spreading_factor:
+            raise ValueError('The payload length must be less than 2^SF.')
+        for i in range(preamble_number):
+            package.append(LoraReservedArtifacts.FULL_UPCHIRP)
+        for i in range(2):
+            package.append(LoraReservedArtifacts.FULL_UPCHIRP)
+        for i in range(2):
+            package.append(LoraReservedArtifacts.FULL_DOWNCHIRP)
+        package.append(LoraReservedArtifacts.QUARTER_DOWNCHIRP)
+
+        package.append(len(payload))
+        package.extend(payload)
+        pkg_time_axis, pkg_frequency_evolution, pkg_signal = self.modulate_symbols(package)
+        payload_time_axis, payload_frequency_evolution, payload_signal = self.modulate_symbols(payload)
+        return payload, package, payload_time_axis, payload_frequency_evolution, payload_signal, pkg_time_axis, pkg_frequency_evolution, pkg_signal
+
+    def modulate_n_plot_explicit_package(self, preamble_number, payload, use_preamble = False, return_payload_signal = False):
+        '''
+        This function modulates an explicit package in the LoRa modulation and then sets all the plots.
+
+        Parameters:
+
+        preamble_number (int): The number of preambles in the package.
+
+        payload (list): The payload of the package.
+
+        use_preamble (bool): A boolean indicating if the preamble shall be used in the plots. Using it will show the preamble and sync window artifacts. It may result in a more crowded plot.
+
+        return_payload_signal (bool): A boolean indicating if the signal containging only the payload should be returned also. Useful when plotting the synchronization process.        
+
+        Returns:
+
+        pkg_signal (np.array): The signal of the package.
+
+        payload_signal (np.array): The signal of the payload. Only if return_payload_signal is True.
+        
+        '''
+        payload, package, payload_time_axis, payload_frequency_evolution, payload_signal, pkg_time_axis, pkg_frequency_evolution, pkg_signal = self.debug_modulate_explicit_package(preamble_number, payload)
+        fig, axs = plt.subplots(3, 1, figsize=(18, 10))
+    
+        if use_preamble:
+            n_upchirps = package.count(LoraReservedArtifacts.FULL_UPCHIRP)
+            n_downchirps = package.count(LoraReservedArtifacts.FULL_DOWNCHIRP)
+            n_quarter_downchirps = package.count(LoraReservedArtifacts.QUARTER_DOWNCHIRP)
+            payload_length = len(payload)
+            str_preamble = "[UpCh:" + str(n_upchirps) + " DwnCh:" + str(n_downchirps) + " Q-DwnCh:" + str(n_quarter_downchirps) +"]+" + f"len:{str([payload_length])}+" + " symb:"
+
+            fig.suptitle("LoRa Modulation Process for package: " + str_preamble+ str(payload) , fontsize=16)
+            time_axis = pkg_time_axis
+            inst_freq_evo = pkg_frequency_evolution
+            tx_signal = pkg_signal
+        else:
+            fig.suptitle("LoRa Modulation Process for symbols: " + str(payload) , fontsize=16)
+            time_axis = payload_time_axis
+            inst_freq_evo = payload_frequency_evolution
+            tx_signal = payload_signal
+
+        
+        axs[0].plot(time_axis, inst_freq_evo)
+        axs[0].set_title("Instantaneous Frequency Evolution")
+        axs[0].set_xlabel("Time (s)")
+        axs[0].set_ylabel("Frequency (Hz)")
+
+        axs[1].plot(time_axis, tx_signal.real)
+        axs[1].set_title("Real Part of the Modulated Signal")
+        axs[1].set_xlabel("Time (s)")
+        axs[1].set_ylabel("Amplitude")
+
+        axs[2].plot(time_axis, tx_signal.imag)
+        axs[2].set_title("Imaginary Part of the Modulated Signal")
+        axs[2].set_xlabel("Time (s)")
+        axs[2].set_ylabel("Amplitude")
+        plt.subplots_adjust(hspace=0.5)
+        plt.show()
+        if return_payload_signal:
+            return pkg_signal, payload_signal
+        return pkg_signal
+                                         
 
 
 class LoraDemodulator():
@@ -298,7 +407,6 @@ class LoraDemodulator():
         new_correlation = [correlation[i]+correlation[i + (spc-1)*2**sf] for i in range(fft_ideal_length)]
         return new_correlation
 
-
     def demodulate_symbol(self, symbol_signal, base_fn = 'downchirp', return_magnitude = False):
         '''
         This function demodulates a symbol in the LoRa modulation.
@@ -324,6 +432,37 @@ class LoraDemodulator():
             return symbol, correlation[symbol]
         return symbol
 
+    def debug_demodulate_symbol(self, symbol_signal, base_fn = 'downchirp'):
+        '''
+        This function demodulates a symbol in the LoRa modulation.
+
+        Debug mode (returns more information).
+
+        Parameters:
+
+        symbol_signal (np.array): The signal of the symbol in the modulation.
+        base_fn (np.array): A string indicating the base function of the symbol in the modulation that shall be used.
+
+        Returns:
+
+        dechirped_signal (np.array): The dechirped signal of the symbol in the modulation (base signal and receives signal product).
+
+        correlation (np.array): The correlation of the dechirped signal. (fft of the dechirped signal)
+
+        symbol (int): The symbol of the LoRa modulation.
+        '''
+
+        base_signal = self._base_signals.get(base_fn)
+        if base_signal is None:
+            raise ValueError(f'The base function {base_fn} is not recognized. It must be either "downchirp", "upchirp" or "quarter_upchirp".')
+        dechirped_signal = [symbol_signal[i] * base_signal[i] for i in range(len(symbol_signal))]
+        correlation = np.fft.fft(dechirped_signal)
+        correlation = self.adjust_correlation(correlation)
+        symbol = np.argmax(correlation) % 2**self._spreading_factor
+        
+        
+        return dechirped_signal, correlation, symbol
+
     def demodulate_symbols(self, signal, base_fn = 'downchirp', return_magnitude = False):
         '''
         This function demodulates the symbols in the LoRa modulation payload, given that the received signal is already synchronized.
@@ -335,7 +474,7 @@ class LoraDemodulator():
 
         Returns:
 
-        symbols (list): The list of symbols in the LoRa modulation.
+        symbol (int): The symbol of the LoRa modulation.
         '''
         spc = self._samples_per_chip
         sf = self._spreading_factor
@@ -354,8 +493,81 @@ class LoraDemodulator():
                 symbols.append(symbol)
                 magnitudes.append(magnitude)
             return symbols, magnitudes
+    
+    def debug_demodulate_symbols(self, signal, base_fn = 'downchirp'):
+        '''
+        This function demodulates the symbols in the LoRa modulation payload, given that the received signal is already synchronized.
 
+        Debug mode (returns more information).
 
+        Parameters:
+
+        signal (np.array): The signal of the received LoRa modulation.
+        base_fn (np.array): A string indicating the base function to be used in the demodulation.
+
+        Returns:
+
+        dechirped_signals (list): The dechirped signals of the symbols in the LoRa demodulation.
+
+        correlations (list): The correlations of the dechirped signals. (fft of the dechirped signals)
+
+        symbols (list): The list of symbols in the LoRa modulation.
+        '''
+        spc = self._samples_per_chip
+        sf = self._spreading_factor
+        symbols = []
+        dechirped_signals = []
+        correlations = []
+        for i in range(0, len(signal), spc * 2**sf):
+            symbol_signal = signal[i:i + spc * 2**sf]
+            dechirped_signal, correlation, symbol = self.debug_demodulate_symbol(symbol_signal, base_fn)
+            dechirped_signals.append(dechirped_signal)
+            correlations.append(correlation)
+            symbols.append(symbol)
+            
+        return dechirped_signals, correlations, symbols
+
+    def demodulate_n_plot_symbols(self, signal):
+        '''
+        This function demodulates the symbols in the LoRa modulation payload, given that the received signal is already synchronized, and then sets all the plots.
+
+        Parameters:
+
+        signal (np.array): The signal of the received LoRa modulation.
+        
+
+        Returns:
+
+        symbols (list): The list of symbols in the LoRa modulation.
+        '''
+        dechirped_signals, ffts, received_symbols = self.debug_demodulate_symbols(signal, 'downchirp')
+
+        n_dechirped = len(dechirped_signals)
+        # Regulate plot height due to the dynamic number of dechirped signals
+        height = 5 + 5 * n_dechirped
+
+        fig, axs = plt.subplots(n_dechirped + 1, 1, figsize=(18, height))
+        fig.suptitle("LoRa Demodulation Process", fontsize=16)
+
+        for i, dechirped_signal in enumerate(dechirped_signals):
+            dechirped_signal = np.array(dechirped_signal)
+            axs[i].plot(dechirped_signal.real)
+            axs[i].plot(dechirped_signal.imag)
+            axs[i].set_title(f"Dechirped Signal for {i}th received Symbol")
+            axs[i].set_xlabel("Samples")
+            axs[i].set_ylabel("Amplitude")
+
+            axs[n_dechirped].plot(ffts[i], label=f"{i}th Symbol: {received_symbols[i]}")
+
+        axs[n_dechirped].set_title("FFT of the Dechirped Signals")
+        axs[n_dechirped].set_xlabel("Frequency (Hz)")
+        axs[n_dechirped].set_ylabel("Magnitude")
+        axs[n_dechirped].legend()
+
+        plt.subplots_adjust(hspace=0.5)
+
+        plt.show()
+        return received_symbols
 
 class LoraSynchronizer():
     """Class that implements the synchronization of LoRa signals."""
@@ -546,3 +758,46 @@ class LoraSynchronizer():
         print("Offset that ensures Highest Quality Synchronization: ", chosen_offset)
         payload_index = chosen_offset + payload_index
         return payload_index, chosen_offset
+
+    def plot_synchronization(self, rx_buffer, rx_sync_signal, transmitted_payload=None):
+        """
+        Generates a plot to illustrate the synchronization process. It should be used after the synchronization process to visualize the results.
+
+        The plot shows the first segment of the unsynchronized buffer, the synchronized signal, and the transmitted payload for comparison.
+
+        Args:
+
+        rx_buffer (numpy.ndarray): The non synchronized buffer of reception.
+        rx_sync_signal (numpy.ndarray): The synchronized signal from the received buffer.
+        transmitted_payload (numpy.ndarray): The transmitted PAYLOAD for comparison. (Optional)
+        """
+        if transmitted_payload is None:
+            n_subplots = 2
+        else:
+            n_subplots = 3
+        fig, axs = plt.subplots(n_subplots, 1, figsize=(18, 10))
+        fig.suptitle("Received Signal for Synchronization", fontsize=16)
+
+        rx_buffer_segment = rx_buffer[:len(rx_sync_signal)]
+        axs[0].plot(rx_buffer_segment.real)
+        axs[0].plot(rx_buffer_segment.imag)
+        axs[0].set_title("A Received Buffer Segment (it is not synchronized and therefore not reliable for demodulation)")
+        axs[0].set_xlabel("Samples")
+        axs[0].set_ylabel("Amplitude")
+
+        axs[1].plot(rx_sync_signal.real)
+        axs[1].plot(rx_sync_signal.imag)
+        axs[1].set_title("Synchronized Signal from the Received (whole) Buffer")
+        axs[1].set_xlabel("Samples")
+        axs[1].set_ylabel("Amplitude")
+
+        if transmitted_payload is not None:
+            axs[2].plot(transmitted_payload.real)
+            axs[2].plot(transmitted_payload.imag)
+            axs[2].set_title("Transmitted Payload. Useful for comparison as this should be the syncrhonized received signal.")
+            axs[2].set_xlabel("Samples")
+            axs[2].set_ylabel("Amplitude")
+
+        plt.subplots_adjust(hspace=0.5)
+
+        plt.show()
