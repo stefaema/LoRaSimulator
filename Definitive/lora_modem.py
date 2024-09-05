@@ -249,7 +249,7 @@ class LoraModulator():
         payload_time_axis, payload_frequency_evolution, payload_signal = self.modulate_symbols(payload)
         return payload, package, payload_time_axis, payload_frequency_evolution, payload_signal, pkg_time_axis, pkg_frequency_evolution, pkg_signal
 
-    def modulate_n_plot_explicit_package(self, preamble_number, payload, use_preamble = False, return_payload_signal = False):
+    def modulate_n_plot_explicit_package(self, preamble_number, payload, plot_with_preamble = False, return_payload_signal = False):
         '''
         This function modulates an explicit package in the LoRa modulation and then sets all the plots.
 
@@ -273,7 +273,7 @@ class LoraModulator():
         payload, package, payload_time_axis, payload_frequency_evolution, payload_signal, pkg_time_axis, pkg_frequency_evolution, pkg_signal = self.debug_modulate_explicit_package(preamble_number, payload)
         fig, axs = plt.subplots(3, 1, figsize=(18, 10))
     
-        if use_preamble:
+        if plot_with_preamble:
             n_upchirps = package.count(LoraReservedArtifacts.FULL_UPCHIRP)
             n_downchirps = package.count(LoraReservedArtifacts.FULL_DOWNCHIRP)
             n_quarter_downchirps = package.count(LoraReservedArtifacts.QUARTER_DOWNCHIRP)
