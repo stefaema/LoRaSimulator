@@ -164,7 +164,8 @@ class LoraModulator():
         symbols (list): The list of symbols in the modulation.
 
         Returns:
-
+        timeline (np.array): The timeline of the LoRa modulation.
+        frequency_evolution (np.array): The instantaneous frequency of the LoRa modulation.
         signal (np.array): The signal of the LoRa modulation.
         '''
         timeline = self.generate_timeline(symbols)
@@ -172,9 +173,9 @@ class LoraModulator():
         signal = self.generate_signal(symbols)
         return timeline, frequency_evolution, signal
     
-    def modulate_implicit_package(self, preamble_number, payload):
+    def modulate_explicit_package(self, preamble_number, payload):
         '''
-        This function modulates an implicit package in the LoRa modulation.
+        This function modulates an explicit package in the LoRa modulation. (The header only consists of the number of symbols in the payload).
 
         Parameters:
 
