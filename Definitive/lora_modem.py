@@ -3,6 +3,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 class LoraReservedArtifacts(Enum):
+    """
+    Enum class that contains the reserved artifacts of LoRa modulation.
+    FULL_UPCHIRP: The full upchirp artifact. It is used to indicate the start of a package and it is the same as the symbol 0.
+    FULL_DOWNCHIRP: The full downchirp artifact. It is used to indicate the end of a package and it is the same as the symbol 0 but with negative slope.
+    QUARTER_DOWNCHIRP: The quarter downchirp artifact. It is used to indicate the start of the payload of a package and it is the same as the symbol 0 but with negative slope and only 1/4 of the duration.
+    """
     FULL_UPCHIRP = -1
     FULL_DOWNCHIRP = -2
     QUARTER_DOWNCHIRP = -3
@@ -179,7 +185,7 @@ class LoraModulator():
 
         Parameters:
 
-        preamble_number (int): The number of preambles in the package.
+        preamble_number (int): The number of preamble artifacts in the package.
         payload (list): The payload of the package.
 
         Returns:
@@ -311,8 +317,6 @@ class LoraModulator():
             return pkg_signal, payload_signal
         return pkg_signal
                                          
-
-
 class LoraDemodulator():
     """Class that implements the demodulation of LoRa signals."""
     def validate_parameters(self):
@@ -418,7 +422,7 @@ class LoraDemodulator():
 
         Returns:
 
-        symbol (int): The symbol of the LoRa modulation.
+        symbol (int): The symbol of the observed LoRa modulation.
         '''
         base_signal = self._base_signals.get(base_fn)
         if base_signal is None:
@@ -449,7 +453,7 @@ class LoraDemodulator():
 
         correlation (np.array): The correlation of the dechirped signal. (fft of the dechirped signal)
 
-        symbol (int): The symbol of the LoRa modulation.
+        symbol (int): The symbol of the observed LoRa modulation.
         '''
 
         base_signal = self._base_signals.get(base_fn)
@@ -474,7 +478,7 @@ class LoraDemodulator():
 
         Returns:
 
-        symbol (int): The symbol of the LoRa modulation.
+        symbol (int): The symbol of the observed LoRa modulation.
         '''
         spc = self._samples_per_chip
         sf = self._spreading_factor
@@ -511,7 +515,7 @@ class LoraDemodulator():
 
         correlations (list): The correlations of the dechirped signals. (fft of the dechirped signals)
 
-        symbols (list): The list of symbols in the LoRa modulation.
+        symbols (list): The list of symbols in observed the LoRa modulation.
         '''
         spc = self._samples_per_chip
         sf = self._spreading_factor
@@ -538,7 +542,7 @@ class LoraDemodulator():
 
         Returns:
 
-        symbols (list): The list of symbols in the LoRa modulation.
+        symbols (list): The list of symbols in the observed LoRa modulation.
         '''
         dechirped_signals, ffts, received_symbols = self.debug_demodulate_symbols(signal, 'downchirp')
 
@@ -557,7 +561,7 @@ class LoraDemodulator():
             axs[i].set_xlabel("Samples")
             axs[i].set_ylabel("Amplitude")
 
-            axs[n_dechirped].plot(ffts[i], label=f"{i}th Symbol: {received_symbols[i]}")
+            axs[n_dechirped].plot(np.real(ffts[i]), label=f"{i}th Symbol: {received_symbols[i]}")
 
         axs[n_dechirped].set_title("FFT of the Dechirped Signals")
         axs[n_dechirped].set_xlabel("Frequency (Hz)")
@@ -589,11 +593,21 @@ class LoraSynchronizer():
         self._preamble_number = preamble_number
 
     def _detect_chirp(self, signal_segment, chirp_type):
-        """Helper function to detect specific chirp types in a given signal segment."""
+        """
+        Helper function that detects if a signal_segment demodulates as a certain LoRa Reserved Artifact.
+
+        Parameters:
+        signal_segment (np.array): The signal segment to analyze.
+        chirp_type (str): The chirp type to detect. It must be either 'upchirp' or 'downchirp'.
+
+        Returns:
+        bool: A boolean indicating if the chirp was detected.
+        """
         chirp_type = 'upchirp' if chirp_type == 'downchirp' else 'downchirp'
         return self._demodulator.demodulate_symbol(signal_segment, chirp_type) == 0
 
     def _get_samples_per_symbol(self):
+        """Helper function to calculate the number of samples per symbol."""
         return self._samples_per_chip * 2 ** self._spreading_factor
 
     def synchronize_rx_buffer(self, rx_signal):
@@ -620,6 +634,17 @@ class LoraSynchronizer():
             return None
     
     def _phase1sync(self, rx_signal):
+        """
+        Searches for the preamble in the received signal buffer.
+
+        Parameters:
+        rx_signal (np.array): The received signal buffer.
+
+        Returns:
+        preamble_found (bool): A boolean indicating if the preamble was found.
+        payload_index (int): The index of the payload start.
+        package_length (int): The length of the package.
+        """
         sps = self._get_samples_per_symbol()
         print('Synchronization started...')
         print("Phase 1: Searching for upchirps...")
@@ -635,7 +660,7 @@ class LoraSynchronizer():
                 preamble_found, payload_index, reconstructed_preamble = self._phase2sync(rx_signal, i)
                 
                 if preamble_found:
-                    
+                        
                     offset = 0
                     if self._samples_per_chip > 1:
                         
@@ -652,12 +677,24 @@ class LoraSynchronizer():
                     print('Payload starts at index: ', payload_index)
                     upchirps = reconstructed_preamble.count(LoraReservedArtifacts.FULL_UPCHIRP)
                     downchirps = reconstructed_preamble.count(LoraReservedArtifacts.FULL_DOWNCHIRP)
-                    print(f'Reconstructed preamble: [{upchirps + 1} upchirps, {downchirps} downchirps]')
+                    print(f'Reconstructed preamble: [{upchirps + 1} upchirps, {downchirps} downchirps]') # +1 because of the implicit upchirp of phase 1
 
                     return True, payload_index, package_length
         return False, -1, -1
     
     def _phase2sync(self, rx_signal, candidate_index):
+        """
+        Reconstructs the preamble and check if the preamble is complete.
+        
+        Parameters:
+        rx_signal (np.array): The received signal buffer.
+        candidate_index (int): The index of the candidate synchronization point.
+
+        Returns:
+        preamble_found (bool): A boolean indicating if the preamble is complete.
+        payload_index (int): The index of the payload start.
+        reconstructed_preamble (list): The reconstructed preamble list containing the preamble and synchronization window artifacts.
+        """
         sps = self._get_samples_per_symbol()
         
         current_index = candidate_index + sps
@@ -726,7 +763,7 @@ class LoraSynchronizer():
 
     def _phase3sync(self, rx_signal, candidate_index, payload_index, reconstructed_preamble):
         """
-        Refine the synchronization index by evaluating different offsets and choosing the one that ensures the highest quality synchronization.
+        Refine the synchronization index by evaluating different offsets and choosing the one that ensures a synchronization index with the highest quality.
         
         Parameters:
         rx_signal (np.array): The received signal buffer.
@@ -750,6 +787,8 @@ class LoraSynchronizer():
         for offset in range(0, self._samples_per_chip):
             mean_magnitude = self._evaluate_offset(rx_signal, candidate_index, offset, upchirps, downchirps)
             offset_magnitudes.append(mean_magnitude)
+            if mean_magnitude == 0:
+                break
         offset_magnitudes = np.array(offset_magnitudes)
         # Normalizing the magnitudes
         offset_magnitudes = offset_magnitudes / np.max(offset_magnitudes)
@@ -794,7 +833,7 @@ class LoraSynchronizer():
         if transmitted_payload is not None:
             axs[2].plot(transmitted_payload.real)
             axs[2].plot(transmitted_payload.imag)
-            axs[2].set_title("Transmitted Payload. Useful for comparison as this should be the syncrhonized received signal.")
+            axs[2].set_title("Transmitted Payload. Useful for comparison as this should be the synchronized received signal.")
             axs[2].set_xlabel("Samples")
             axs[2].set_ylabel("Amplitude")
 
