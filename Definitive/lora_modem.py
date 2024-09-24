@@ -5,9 +5,9 @@ import matplotlib.pyplot as plt
 class LoraReservedArtifacts(Enum):
     """
     Enum class that contains the reserved artifacts of LoRa modulation.
-    FULL_UPCHIRP: The full upchirp artifact. It is used to indicate the start of a package and it is the same as the symbol 0.
-    FULL_DOWNCHIRP: The full downchirp artifact. It is used to indicate the end of a package and it is the same as the symbol 0 but with negative slope.
-    QUARTER_DOWNCHIRP: The quarter downchirp artifact. It is used to indicate the start of the payload of a package and it is the same as the symbol 0 but with negative slope and only 1/4 of the duration.
+    FULL_UPCHIRP: The full upchirp artifact. It is used to indicate the start of the package's preamble and it is the same as the symbol 0.
+    FULL_DOWNCHIRP: The full downchirp artifact. It is part of the package's SFD and it is the same as the symbol 0 but with negative slope.
+    QUARTER_DOWNCHIRP: The quarter downchirp artifact. It is used to indicate the end of the package's SFD and it is the same as the symbol 0 but with negative slope and only 1/4 of the duration.
     """
     FULL_UPCHIRP = -1
     FULL_DOWNCHIRP = -2
@@ -54,6 +54,7 @@ class LoraModulator():
         timeline (np.array): The timeline of the LoRa modulation.
         '''
         num_symbols = len(symbols)
+        # The quarter downchirp is not a full symbol, so we must subtract 0.75 from the number of symbols. As the duration has to be divisible by 4 because of its binary nature, we can subtract 0.75 without any problem.
         if LoraReservedArtifacts.QUARTER_DOWNCHIRP in symbols:
             num_symbols = num_symbols - 0.75
 
@@ -81,7 +82,7 @@ class LoraModulator():
         sf = self._spreading_factor
 
         for symbol in symbols:
-            aux_factor = 1
+            slope_sign = 1
             sample_range = range(spc * 2**sf)
             if symbol not in range(0, 2**sf) and not isinstance(symbol, LoraReservedArtifacts):
                 raise ValueError('The symbol must be an integer between 0 and 2^SF - 1 or a LoRa Reserved Artifact.')
@@ -90,15 +91,16 @@ class LoraModulator():
                     symbol = 0
                 elif symbol == LoraReservedArtifacts.FULL_DOWNCHIRP:
                     symbol = 0
-                    aux_factor = -1
+                    slope_sign = -1
 
                 elif symbol == LoraReservedArtifacts.QUARTER_DOWNCHIRP:
                     symbol = 0
-                    aux_factor = -1
+                    slope_sign = -1
+                    # This means that the quarter downchirp is only 1/4 of the duration of a full symbol, so we must adjust the sample range.
                     sample_range = range(spc * 2**sf // 4)
-                    
             y_intercept = symbol * (self._bandwidth / 2**sf)
-            symbol_frequency_evolution = [ ( y_intercept + aux_factor * k/(self._symbol_duration * spc) ) % (aux_factor * self._bandwidth) for k in sample_range]
+            # Computes the frequency evolution of the symbol and appends it to the whole frequency evolution.
+            symbol_frequency_evolution = [ ( y_intercept + slope_sign * k/(self._symbol_duration * spc) ) % (slope_sign * self._bandwidth) for k in sample_range]
             whole_frequency_evolution.extend(symbol_frequency_evolution)
 
         whole_frequency_evolution = np.array(whole_frequency_evolution)
@@ -121,7 +123,7 @@ class LoraModulator():
         whole_phase_evolution = []
         
         for symbol in symbols:
-            aux_factor = 1
+            slope_sign = 1
             samples_range = range(spc * 2**sf)
             if symbol not in range(0, 2**sf) and not isinstance(symbol, LoraReservedArtifacts):
                 raise ValueError('The symbol must be an integer between 0 and 2^SF - 1 or a LoRa Reserved Artifact.')
@@ -130,13 +132,13 @@ class LoraModulator():
                     symbol = 0
                 elif symbol == LoraReservedArtifacts.FULL_DOWNCHIRP:
                     symbol = 0
-                    aux_factor = -1
+                    slope_sign = -1
                 elif symbol == LoraReservedArtifacts.QUARTER_DOWNCHIRP:
                     symbol = 0
-                    aux_factor = -1
+                    slope_sign = -1
                     samples_range = range(spc * 2**sf // 4)
-
-            symbol_phase_evolution_1 = [2 * np.pi *(symbol + aux_factor * k/(2*spc))*(k/(2**sf * spc)) for k in samples_range]
+            # Computes the phase evolution of the symbol and appends it to the whole phase evolution.
+            symbol_phase_evolution_1 = [2 * np.pi *(symbol + slope_sign * k/(2*spc))*(k/(2**sf * spc)) for k in samples_range]
             indicator_function = [1 if ( (k/spc) > (2**sf - symbol) ) else 0 for k in samples_range]
             symbol_phase_evolution_2 = [( -2*np.pi * (k/spc - (2**sf - symbol)) ) * indicator_function[k] for k in samples_range]
             symbol_phase_evolution = [symbol_phase_evolution_1[k] + symbol_phase_evolution_2[k] for k in samples_range]
@@ -157,6 +159,7 @@ class LoraModulator():
 
         signal (np.array): The signal of the LoRa modulation.
         '''
+        # Generates the instantaneous phase of the modulation and then computes the signal for a given array of symbols.
         instantaneous_phase = self.generate_instantaneous_phase(symbols)
         signal = np.array([self._signal_coefficient * np.exp(1j * phase) for phase in instantaneous_phase])
         return signal
@@ -193,6 +196,7 @@ class LoraModulator():
         signal (np.array): The signal of the LoRa modulation.
         '''
         package = []
+        # Adds the preamble, sync window artifacts, the header and the payload to the package.
         if len(payload) > 2**self._spreading_factor:
             raise ValueError('The payload length must be less than 2^SF.')
         for i in range(preamble_number):
