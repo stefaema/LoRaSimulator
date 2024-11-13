@@ -1,0 +1,2 @@
+1. Implementar encoder (casteo, gray, o algo)
+2. Si no hay ruido, que pasa con ber y ser. Si aparecen puntos hay algo mal.
