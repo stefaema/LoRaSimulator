@@ -13,8 +13,6 @@ class LoraReservedArtifacts(Enum):
     FULL_DOWNCHIRP = -2
     QUARTER_DOWNCHIRP = -3
 
-
-
 class LoraModulator():
     """Class that implements the modulation of LoRa signals."""
     def validate_parameters(self):
@@ -320,7 +318,22 @@ class LoraModulator():
         if return_payload_signal:
             return pkg_signal, payload_signal
         return pkg_signal
-                                         
+
+    def get_sync_basis(self):
+        '''
+        This function generates the synchronization basis of the LoRa modulation.
+
+        Returns:
+
+        sync_basis (np.array): The synchronization basis of the LoRa modulation.
+        '''
+        sync_basis = []
+        for i in range(2):
+            sync_basis.append(LoraReservedArtifacts.FULL_DOWNCHIRP)
+            sync_basis.append(LoraReservedArtifacts.FULL_DOWNCHIRP)
+        sync_basis.append(LoraReservedArtifacts.QUARTER_DOWNCHIRP)
+        return self.generate_signal(sync_basis)
+                                            
 class LoraDemodulator():
     """Class that implements the demodulation of LoRa signals."""
     def validate_parameters(self):
@@ -577,7 +590,154 @@ class LoraDemodulator():
         plt.show()
         return received_symbols
 
-class LoraSynchronizer():
+class LoraCorrelationSynchronizer:
+    """Class that implements a simple synchronization of LoRa signals using cross-correlation."""
+
+    def validate_parameters(self, spreading_factor, samples_per_chip, bandwidth, sync_basis):
+        if spreading_factor not in range(7, 13) or not isinstance(spreading_factor, int):
+            raise ValueError('The spreading factor must be an integer between 7 and 12.')
+        if samples_per_chip < 1 or not isinstance(samples_per_chip, int):
+            raise ValueError('Samples per chip must be a positive integer')
+        if bandwidth <= 0:
+            raise ValueError('Bandwidth must be positive')
+        if not isinstance(sync_basis, np.ndarray):
+            raise ValueError('sync_basis must be a numpy array')
+
+    def __init__(self, spreading_factor, samples_per_chip, bandwidth, sync_basis):
+        self.validate_parameters(spreading_factor, samples_per_chip, bandwidth, sync_basis)
+        self._spreading_factor = spreading_factor
+        self._samples_per_chip = samples_per_chip
+        self._bandwidth = bandwidth
+        self._sync_basis = sync_basis
+        self._demodulator = LoraDemodulator(spreading_factor, bandwidth, samples_per_chip)
+
+    def _get_samples_per_symbol(self):
+        """Helper function to calculate the number of samples per symbol."""
+        return self._samples_per_chip * 2 ** self._spreading_factor
+
+    def synchronize_rx_buffer(self, rx_buffer):
+        """
+        Synchronizes the received buffer by finding the start and end of the payload.
+
+        Parameters:
+        rx_buffer (np.ndarray): The received signal buffer.
+
+        Returns:
+        np.ndarray: The synchronized payload segment.
+        """
+        # Find the start of the message
+        buffer_without_preamble = self._synchronize_start(rx_buffer)
+        if buffer_without_preamble.size == 0:
+            print('Synchronization failed during start synchronization!')
+            return None
+
+        # Find the end of the message
+        payload = self._synchronize_end(buffer_without_preamble)
+        if payload.size == 0:
+            print('Synchronization failed during end synchronization!')
+            return None
+
+        return payload
+
+    def _synchronize_start(self, rx_buffer):
+        """
+        Finds the start of the message body in rx_buffer using cross-correlation with sync_basis.
+        """
+        # Perform cross-correlation
+        corr = np.correlate(rx_buffer, self._sync_basis, mode='full')
+        
+        # Find the index where the correlation is maximum
+        i_max = np.argmax(np.abs(corr))
+        
+        # Calculate the lag corresponding to the maximum correlation
+        lag = i_max - (len(self._sync_basis) - 1)
+        
+        if lag < 0:
+            print("Warning: The synchronization basis extends beyond the start of the reception buffer.")
+            lag = 0  # Adjust lag to 0 if negative
+        
+        print(f"Synchronization pattern start found at index {lag}")
+        
+        # Calculate the index where the message body starts
+        message_start = lag + len(self._sync_basis)
+        
+        # Check that the index does not exceed the buffer length
+        if message_start >= len(rx_buffer):
+            print("Warning: The message start index exceeds the reception buffer length.")
+            return np.array([])  # Return an empty array if the index is invalid
+        
+        print(f"Message body start found at index {message_start}")
+        
+        # Return the buffer from the message body start
+        return rx_buffer[message_start:]
+
+    def _synchronize_end(self, buffer_without_preamble):
+        """
+        Finds the end of the buffer by determining the payload length from the first symbol.
+
+        Parameters:
+        buffer_without_preamble (np.ndarray): The received signal buffer without the preamble.
+
+        Returns:
+        np.ndarray: The payload segment of the received signal.
+        """
+        samples_per_symbol = self._get_samples_per_symbol()
+        # Demodulate the payload length symbol
+        payload_length_signal = buffer_without_preamble[:samples_per_symbol]
+        payload_length = self._demodulator.demodulate_symbol(payload_length_signal)
+        payload_start = samples_per_symbol  # Skip the length symbol
+        payload_end = payload_start + payload_length * samples_per_symbol
+        if payload_end > len(buffer_without_preamble):
+            print("Warning: The payload end index exceeds the buffer length.")
+            return np.array([])  # Return an empty array if the index is invalid
+        return buffer_without_preamble[payload_start:payload_end]
+    
+    def plot_synchronization(self, rx_buffer, rx_sync_signal, transmitted_payload=None):
+        """
+        Generates a plot to illustrate the synchronization process. It should be used after the synchronization process to visualize the results.
+
+        The plot shows the first segment of the unsynchronized buffer, the synchronized signal, and the transmitted payload for comparison.
+
+        Args:
+
+        rx_buffer (numpy.ndarray): The non-synchronized buffer of reception.
+        rx_sync_signal (numpy.ndarray): The synchronized signal from the received buffer.
+        transmitted_payload (numpy.ndarray): The transmitted PAYLOAD for comparison. (Optional)
+        """
+        if transmitted_payload is None:
+            n_subplots = 2
+        else:
+            n_subplots = 3
+        fig, axs = plt.subplots(n_subplots, 1, figsize=(18, 10))
+        fig.suptitle("Received Signal for Synchronization", fontsize=16)
+
+        rx_buffer_segment = rx_buffer[:len(rx_sync_signal)]
+        axs[0].plot(rx_buffer_segment.real, label='Real Part')
+        axs[0].plot(rx_buffer_segment.imag, label='Imaginary Part')
+        axs[0].set_title("A Received Buffer Segment (unsynchronized)")
+        axs[0].set_xlabel("Samples")
+        axs[0].set_ylabel("Amplitude")
+        axs[0].legend()
+
+        axs[1].plot(rx_sync_signal.real, label='Real Part')
+        axs[1].plot(rx_sync_signal.imag, label='Imaginary Part')
+        axs[1].set_title("Synchronized Signal from the Received Buffer")
+        axs[1].set_xlabel("Samples")
+        axs[1].set_ylabel("Amplitude")
+        axs[1].legend()
+
+        if transmitted_payload is not None:
+            axs[2].plot(transmitted_payload.real, label='Real Part')
+            axs[2].plot(transmitted_payload.imag, label='Imaginary Part')
+            axs[2].set_title("Transmitted Payload (for comparison)")
+            axs[2].set_xlabel("Samples")
+            axs[2].set_ylabel("Amplitude")
+            axs[2].legend()
+
+        plt.subplots_adjust(hspace=0.5)
+        plt.show()
+
+class LoraOriginalSynchronizer():
     """Class that implements the synchronization of LoRa signals."""
     def validate_parameters(self, spreading_factor, samples_per_chip, demodulator, preamble_number):
         if spreading_factor not in range(7, 13) or not isinstance(spreading_factor, int):
@@ -844,3 +1004,157 @@ class LoraSynchronizer():
         plt.subplots_adjust(hspace=0.5)
 
         plt.show()
+
+class SimpleLoraMoDem():
+    def __init__(self, spreading_factor, bandwidth, samples_per_chip = 1):
+        self.spreading_factor = spreading_factor
+        self.bandwidth = bandwidth
+        self.samples_per_chip = samples_per_chip
+        self.downchirp = self.generate_downchirp()
+    
+    def generate_downchirp(self):
+        chips_number = 2**self.spreading_factor  # Número de chips por símbolo
+        k = np.arange(chips_number * self.samples_per_chip)  # Índices de tiempo
+        downchirp = np.exp(-1j * 2 * np.pi * (k**2) / (chips_number * (self.samples_per_chip**2)))  # Término e^{-j 2π k² / 2^SF}
+        downchirp_power = np.mean(np.abs(downchirp)**2)
+        downchirp = downchirp / np.sqrt(downchirp_power)
+        return downchirp
+
+    def modulate_symbols(self, symbols):
+        signal = np.array([])
+        for symbol in symbols:
+            """
+            Genera la señal LoRa para un símbolo dado.
+
+            Parameters:
+            symbols (int): Símbolos a modular.
+            Returns:
+            np.array: Señal LoRa generada.
+            """
+            chips_number = 2**self.spreading_factor  # Número de chips por símbolo
+            k = np.arange(chips_number * self.samples_per_chip)  # Índices de tiempo
+
+            # Generar la señal LoRa
+            parcial_signal = (1 / np.sqrt(chips_number)) * np.exp(
+                1j * 2 * np.pi * ((symbol + k / self.samples_per_chip) % chips_number)  * (k / (self.samples_per_chip * chips_number))
+            )
+            signal = np.concatenate((signal, parcial_signal))
+        
+        power = np.mean(np.abs(signal)**2)
+        signal = signal / np.sqrt(power)
+        return signal
+    
+    def demodulate_symbols(self, received_signal):
+        """
+        Demodula múltiples símbolos de la señal LoRa recibida, siguiendo la fórmula de la imagen.
+
+        Parameters:
+        received_signal (np.array): Señal LoRa recibida.
+
+        Returns:
+        list: Lista de símbolos demodulados.
+        """
+        symbols = []
+        chips_number = 2**self.spreading_factor  # Número de chips por símbolo
+        samples_per_symbol = chips_number * self.samples_per_chip  # Número de muestras por símbolo
+        
+        # Procesar cada símbolo en la señal recibida
+        for i in range(0, len(received_signal), samples_per_symbol):
+            # Extraer la señal de un símbolo
+            symbol_signal = received_signal[i:i + samples_per_symbol]
+
+            # Evitar procesar símbolos incompletos
+            if len(symbol_signal) < samples_per_symbol:
+                break
+
+            # Multiplicar la señal recibida por el downchirp
+            dechirped_signal = symbol_signal * self.downchirp
+
+            # Aplicar la FFT para obtener la proyección en cada base
+            fft_result = np.fft.fft(dechirped_signal)
+
+            # Seleccionar el índice del símbolo (máximo de la magnitud de la FFT)
+            symbol = np.argmax(np.abs(fft_result)) % chips_number
+
+            # Agregar el símbolo a la lista de resultados
+            symbols.append(symbol)
+
+        return symbols
+    
+class Codec():
+    def __init__(self, spreading_factor, bandwidth, samples_per_chip = 1):
+        self.spreading_factor = spreading_factor
+        self.bandwidth = bandwidth
+        self.samples_per_chip = samples_per_chip
+        
+    def encode(self, data):
+        """
+        Encodes binary data into symbols. Returns the symbols list, preceded by the padding length as the first symbol.
+
+        Parameters:
+        data (bytes or str): The data to encode.
+
+        Returns:
+        list: A list of symbols representing the encoded data.
+        """
+        # Convert data to bytes if it's a string
+        if isinstance(data, str):
+            data = data.encode('utf-8')
+
+        # Convert data to a binary string
+        bits = ''.join(format(byte, '08b') for byte in data)
+
+        # Calculate the number of bits per symbol
+        bits_per_symbol = self.spreading_factor
+
+        # Calculate padding needed to fill the last symbol
+        padding = (bits_per_symbol - (len(bits) % bits_per_symbol)) % bits_per_symbol
+        bits += '0' * padding  # Pad with zeros
+
+        # Convert bits to symbols
+        symbols = []
+        for i in range(0, len(bits), bits_per_symbol):
+            symbol_bits = bits[i:i + bits_per_symbol]
+            symbol = int(symbol_bits, 2)
+            symbols.append(symbol)
+
+        # Prepend the padding length as the first symbol
+        symbols.insert(0, padding)
+        return symbols
+        
+    def decode(self, symbols):
+        """
+        Decodes symbols into binary data, taking into account the padding from the first symbol.
+
+        Parameters:
+        symbols (list): The list of symbols to decode.
+
+        Returns:
+        bytes: The decoded binary data.
+        """
+        # The first symbol contains the padding length
+        padding = symbols[0]
+        data_symbols = symbols[1:]
+
+        bits_per_symbol = self.spreading_factor
+
+        # Convert symbols back to bits
+        bits = ''
+        for symbol in data_symbols:
+            symbol_bits = format(symbol, f'0{bits_per_symbol}b')
+            bits += symbol_bits
+
+        # Remove padding bits
+        if padding > 0:
+            bits = bits[:-padding]
+
+        # Convert bits back to bytes
+        data_bytes = bytearray()
+        for i in range(0, len(bits), 8):
+            byte_bits = bits[i:i + 8]
+            byte = int(byte_bits, 2)
+            data_bytes.append(byte)
+
+        return bytes(data_bytes)
+    
+    
