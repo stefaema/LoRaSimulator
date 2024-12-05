@@ -659,7 +659,7 @@ class LoraCorrelationSynchronizer():
         print(f"Synchronization pattern start found at index {lag}")
         
         # Calculate the index where the message body starts
-        message_start = lag + len(self._sync_basis)
+        message_start = i_max + 1
         
         # Check that the index does not exceed the buffer length
         if message_start >= len(rx_buffer):
@@ -1103,7 +1103,7 @@ class Codec():
 
         # Convert data to a binary string
         bits = ''.join(format(byte, '08b') for byte in data)
-
+        print(f'Encoded data to bits: {bits}')
         # Calculate the number of bits per symbol
         bits_per_symbol = self.spreading_factor
 
@@ -1156,5 +1156,5 @@ class Codec():
             data_bytes.append(byte)
 
         return bytes(data_bytes)
-    
+
     
