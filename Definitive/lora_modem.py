@@ -590,7 +590,7 @@ class LoraDemodulator():
         plt.show()
         return received_symbols
 
-class LoraCorrelationSynchronizer:
+class LoraCorrelationSynchronizer():
     """Class that implements a simple synchronization of LoRa signals using cross-correlation."""
 
     def validate_parameters(self, spreading_factor, samples_per_chip, bandwidth, sync_basis):
