@@ -122,3 +122,5 @@ cython_debug/
 
 # VS Code
 .vscode/
+
+*.pyc

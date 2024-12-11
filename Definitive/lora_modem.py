@@ -603,11 +603,12 @@ class LoraCorrelationSynchronizer():
         if not isinstance(sync_basis, np.ndarray):
             raise ValueError('sync_basis must be a numpy array')
 
-    def __init__(self, spreading_factor, samples_per_chip, bandwidth, sync_basis):
+    def __init__(self, spreading_factor, samples_per_chip, bandwidth, sync_basis, verbose = True):
         self.validate_parameters(spreading_factor, samples_per_chip, bandwidth, sync_basis)
         self._spreading_factor = spreading_factor
         self._samples_per_chip = samples_per_chip
         self._bandwidth = bandwidth
+        self._verbose = verbose
         self._sync_basis = sync_basis
         self._demodulator = LoraDemodulator(spreading_factor, bandwidth, samples_per_chip)
 
@@ -628,13 +629,15 @@ class LoraCorrelationSynchronizer():
         # Find the start of the message
         buffer_without_preamble = self._synchronize_start(rx_buffer)
         if buffer_without_preamble.size == 0:
-            print('Synchronization failed during start synchronization!')
+            if self._verbose:
+                print('Synchronization failed during start synchronization!')
             return None
 
         # Find the end of the message
         payload = self._synchronize_end(buffer_without_preamble)
         if payload.size == 0:
-            print('Synchronization failed during end synchronization!')
+            if self._verbose:
+                print('Synchronization failed during end synchronization!')
             return None
 
         return payload
@@ -653,20 +656,24 @@ class LoraCorrelationSynchronizer():
         lag = i_max - (len(self._sync_basis) - 1)
         
         if lag < 0:
-            print("Warning: The synchronization basis extends beyond the start of the reception buffer.")
+            if self._verbose:
+                print("Warning: The synchronization basis extends beyond the start of the reception buffer.")
             lag = 0  # Adjust lag to 0 if negative
         
-        print(f"Synchronization pattern start found at index {lag}")
+        if self._verbose:
+            print(f"Synchronization pattern start found at index {lag}")
         
         # Calculate the index where the message body starts
         message_start = i_max + 1
         
         # Check that the index does not exceed the buffer length
         if message_start >= len(rx_buffer):
-            print("Warning: The message start index exceeds the reception buffer length.")
+            if self._verbose:
+                print("Warning: The message start index exceeds the reception buffer length.")
             return np.array([])  # Return an empty array if the index is invalid
         
-        print(f"Message body start found at index {message_start}")
+        if self._verbose:
+            print(f"Message body start found at index {message_start}")
         
         # Return the buffer from the message body start
         return rx_buffer[message_start:]
@@ -688,7 +695,8 @@ class LoraCorrelationSynchronizer():
         payload_start = samples_per_symbol  # Skip the length symbol
         payload_end = payload_start + payload_length * samples_per_symbol
         if payload_end > len(buffer_without_preamble):
-            print("Warning: The payload end index exceeds the buffer length.")
+            if self._verbose:
+                print("Warning: The payload end index exceeds the buffer length.")
             return np.array([])  # Return an empty array if the index is invalid
         return buffer_without_preamble[payload_start:payload_end]
     
@@ -749,11 +757,12 @@ class LoraOriginalSynchronizer():
         if preamble_number < 1 or not isinstance(preamble_number, int):
             raise ValueError('Preamble number must be a positive integer')
         
-    def __init__(self, spreading_factor, samples_per_chip, demodulator, preamble_number):
+    def __init__(self, spreading_factor, samples_per_chip, demodulator, preamble_number, verbose = True):
         self.validate_parameters(spreading_factor, samples_per_chip, demodulator, preamble_number)
         self._spreading_factor = spreading_factor
         self._samples_per_chip = samples_per_chip
         self._demodulator = demodulator 
+        self._verbose = verbose
         self._preamble_number = preamble_number
 
     def _detect_chirp(self, signal_segment, chirp_type):
@@ -794,7 +803,8 @@ class LoraOriginalSynchronizer():
             rx_payload_segment = rx_signal[payload_start: payload_end]
             return rx_payload_segment
         else:
-            print('Synchronization failed!')
+            if self._verbose:
+                print('Synchronization failed!')
             return None
     
     def _phase1sync(self, rx_signal):
@@ -810,8 +820,9 @@ class LoraOriginalSynchronizer():
         package_length (int): The length of the package.
         """
         sps = self._get_samples_per_symbol()
-        print('Synchronization started...')
-        print("Phase 1: Searching for upchirps...")
+        if self._verbose:
+            print('Synchronization started...')
+            print("Phase 1: Searching for upchirps...")
         for i in range(len(rx_signal)):
             # Extract the iterative segment to analyze
             segment = rx_signal[i:i + sps]
@@ -832,16 +843,21 @@ class LoraOriginalSynchronizer():
                         
                     package_length = self._demodulator.demodulate_symbol(rx_signal[payload_index:payload_index + sps], 'downchirp')
                     
-                    print('Synchronization successful!\n-----------------------------------------------------------')
+                    if self._verbose:
+                        print('Synchronization successful!\n-----------------------------------------------------------')
                     
-                    print('Preamble found at index: ', i + offset)
-                    if self._samples_per_chip > 1:
+                    if self._verbose:
+                        print('Preamble found at index: ', i + offset)
+                    if self._samples_per_chip > 1 and self._verbose:
                         print('Refined by an offset of: ', offset)
-                    print('Package length: ', package_length)
-                    print('Payload starts at index: ', payload_index)
+                    
+                    if self._verbose:
+                        print('Package length: ', package_length)
+                        print('Payload starts at index: ', payload_index)
                     upchirps = reconstructed_preamble.count(LoraReservedArtifacts.FULL_UPCHIRP)
                     downchirps = reconstructed_preamble.count(LoraReservedArtifacts.FULL_DOWNCHIRP)
-                    print(f'Reconstructed preamble: [{upchirps + 1} upchirps, {downchirps} downchirps]') # +1 because of the implicit upchirp of phase 1
+                    if self._verbose:
+                        print(f'Reconstructed preamble: [{upchirps + 1} upchirps, {downchirps} downchirps]') # +1 because of the implicit upchirp of phase 1
 
                     return True, payload_index, package_length
         return False, -1, -1
@@ -884,8 +900,9 @@ class LoraOriginalSynchronizer():
                 if self._detect_chirp(alleged_second_downchip, 'downchirp'):
                     reconstructed_preamble.append(LoraReservedArtifacts.FULL_DOWNCHIRP)
                     payload_index = int(current_index + sps * 1.25)
-                    print("Phase 2: Ensuring that the candidate upchirp is a preamble member...")
-                    print("Preamble allegedly found at index: ", candidate_index)
+                    if self._verbose:
+                        print("Phase 2: Ensuring that the candidate upchirp is a preamble member...")
+                        print("Preamble allegedly found at index: ", candidate_index)
                     return True, payload_index, reconstructed_preamble
                 else:
                     break
@@ -943,7 +960,8 @@ class LoraOriginalSynchronizer():
 
 
         sps = self._get_samples_per_symbol()
-        print("Phase 3: Refining synchronization index... (SPC > 1 requires it)")
+        if self._verbose:
+            print("Phase 3: Refining synchronization index... (SPC > 1 requires it)")
         upchirps = reconstructed_preamble.count(LoraReservedArtifacts.FULL_UPCHIRP)
         downchirps = reconstructed_preamble.count(LoraReservedArtifacts.FULL_DOWNCHIRP)
         offset = 0
@@ -957,8 +975,9 @@ class LoraOriginalSynchronizer():
         # Normalizing the magnitudes
         offset_magnitudes = offset_magnitudes / np.max(offset_magnitudes)
         chosen_offset = np.argmax(offset_magnitudes)
-        print("Offset quality measurements: ", offset_magnitudes)
-        print("Offset that ensures Highest Quality Synchronization: ", chosen_offset)
+        if self._verbose:
+            print("Offset quality measurements: ", offset_magnitudes)
+            print("Offset that ensures Highest Quality Synchronization: ", chosen_offset)
         payload_index = chosen_offset + payload_index
         return payload_index, chosen_offset
 
